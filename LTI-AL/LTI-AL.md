@@ -24,7 +24,7 @@ Los **candidatos** son el único actor con una UI visible: un enlace web públic
 |---|---|
 | **API-first, AWS-style** | Un contrato REST + MCP; sin lock-in de UI. |
 | **MCP-native** | Primer ATS consumible directamente desde agentes LLM. |
-| **Minimalismo radical** | 4 entidades, 4 tablas DynamoDB, 1 Lambda Go. |
+| **Minimalismo radical** | 5 entidades, 5 tablas DynamoDB, 1 Lambda Go. |
 | **Serverless end-to-end** | Escala a cero; costo proporcional al uso real. |
 | **Candidate-centric UI** | La única UI existe para el candidato, no para el recruiter. |
 
@@ -48,7 +48,7 @@ flowchart TB
     P["<b>Problema</b><br/>• ATS tradicionales imponen UI pesada<br/>• Integrarlos al stack del recruiter cuesta semanas<br/>• Screening manual consume el día del recruiter"]
     S["<b>Solución</b><br/>• ATS como API (REST + MCP)<br/>• El recruiter trae su UI (Claude, Cursor, CRM)<br/>• Mini-entrevista IA autoservida por el candidato"]
     UVP["<b>UVP</b><br/>&quot;El ATS que vive dentro de tu<br/>chat. Sin consola, sin fricción.&quot;"]
-    UA["<b>Ventaja Injusta</b><br/>• MCP-native desde día 0<br/>• Stack 100% serverless AWS<br/>• Modelo de datos de 4 tablas"]
+    UA["<b>Ventaja Injusta</b><br/>• MCP-native desde día 0<br/>• Stack 100% serverless AWS<br/>• Modelo de datos de 5 tablas"]
     CS["<b>Segmentos</b><br/>• Recruiters tech-savvy<br/>• Startups que ya usan Claude/Cursor<br/>• Agencias boutique<br/>• HR-tech que revende como white-label"]
     KM["<b>Métricas</b><br/>• MRR<br/>• Vacantes activas por tenant<br/>• Candidatos que completan mini-entrevista<br/>• Latencia p95 de la API"]
     CH["<b>Canales</b><br/>• Anthropic MCP registry<br/>• GitHub / SDK Go+TS<br/>• Content dev-focused<br/>• Partnerships con consultoras RH"]
@@ -115,21 +115,26 @@ flowchart LR
 
 ## 4. Modelo de datos
 
-Sólo **4 tablas DynamoDB**. Claves diseñadas para consultas por tenant y por entidad; sin GSIs innecesarios.
+**5 tablas DynamoDB**. Claves diseñadas para consultas por tenant y por entidad; sin GSIs innecesarios.
 
 ### 4.1 Entidades y atributos
 
 | Entidad | Atributo | Tipo | Nota |
 |---|---|---|---|
+| **tenant** | PK `tenantId`, `name`, `plan`, `webhooks`, `integrations`, `createdAt` | string, string, string `free\|pro\|enterprise`, list<map{event,url,secret}>, map<string,map>, number | `webhooks`: lista opcional de endpoints para eventos (`application.created`, `interview.closed`, `job.closed`, …). `integrations`: config opcional por proveedor (`slack`, `greenhouse`, `workable`, …) con claves cifradas via KMS. |
 | **usuario** (recruiter) | PK `tenantId#userId`, `cognitoSub`, `email`, `name`, `createdAt` | string, string, string, string, number (epoch) | `cognitoSub` también como atributo para lookup inverso. |
 | **candidato** | PK `candidateId`, `cognitoSub`, `email`, `fullName`, `resumeS3Key`, `resumeParsedJson`, `createdAt` | string, string, string, string, string, map, number | User pool de candidatos separado del de recruiters. |
 | **vacante** | PK `tenantId`, SK `jobId`, `title`, `descriptionMd`, `status`, `publicSlug`, `createdAt`, `closedAt` | string, string, string, string, string `open\|closed`, string, number, number | Query *list jobs by tenant* → PK = tenantId. |
 | **candidatura** | PK `jobId`, SK `candidateId`, `tenantId`, `status`, `interviewTranscript`, `interviewSummary`, `fitScore`, `createdAt`, `updatedAt` | string, string, string, string `applied\|interviewing\|reviewed\|rejected\|hired`, list<map>, string, number, number, number | GSI1 PK=`candidateId` para "mis aplicaciones". |
 
+Los **webhooks** son opcionales y best-effort: tras cada evento relevante la Lambda dispara un `POST` firmado con HMAC (secreto del tenant) al endpoint registrado. Fallos se reintentan con backoff exponencial hasta N veces; no hay cola dedicada (se usa `SQS` sólo si un tenant supera el umbral, fuera del v1).
+
 ### 4.2 Diagrama de relaciones (lógicas, no FKs)
 
 ```mermaid
 erDiagram
+  TENANT ||--o{ USUARIO : contains
+  TENANT ||--o{ VACANTE : scopes
   USUARIO ||--o{ VACANTE : owns
   VACANTE ||--o{ CANDIDATURA : receives
   CANDIDATO ||--o{ CANDIDATURA : submits
@@ -143,7 +148,7 @@ erDiagram
 
 Todo es **serverless en AWS**. Una única **Lambda Go** (función monolítica con router HTTP) sirve tanto la **REST API** como el **MCP server** (detecta el path). **API Gateway HTTP API** la expone. La autenticación la hace **Cognito** (dos user pools: `recruiters` y `candidates`); los tokens JWT llevan `custom:tenantId` en sus claims, que el handler lee para aislar datos.
 
-**DynamoDB** guarda las 4 tablas; **S3** guarda los CVs crudos. **OpenRouter** es el proveedor LLM para parseo de CV y mini-entrevista.
+**DynamoDB** guarda las 5 tablas; **S3** guarda los CVs crudos. **OpenRouter** es el proveedor LLM para parseo de CV y mini-entrevista.
 
 El **portal del candidato** es una app **Next.js desplegada en Vercel**, que habla directamente con la API (con token del candidato) y con S3 (presigned URLs).
 
@@ -165,7 +170,7 @@ flowchart TB
     COG2[(Cognito<br/>User Pool candidatos)]
     APIGW[API Gateway HTTP]
     LAMBDA[Lambda Go<br/>REST + MCP]
-    DDB[(DynamoDB<br/>usuario, candidato,<br/>vacante, candidatura)]
+    DDB[(DynamoDB<br/>tenant, usuario, candidato,<br/>vacante, candidatura)]
     S3[(S3<br/>CVs)]
   end
 
@@ -256,7 +261,7 @@ flowchart TB
     SVC_APP[ApplicationsService]
     SVC_INT[InterviewService]
     SVC_CV[ResumeService]
-    REPO[DynamoDB Repos<br/>4 tablas]
+    REPO[DynamoDB Repos<br/>5 tablas]
     S3CLI[S3 Client<br/>presigned URLs]
     LLM[OpenRouter Client]
   end

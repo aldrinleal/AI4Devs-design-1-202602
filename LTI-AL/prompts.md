@@ -107,3 +107,26 @@ este directorio
 ```
 
 Acciones: `git mv specs/LTI-AL LTI-AL`, `git mv specs/00-statement.md LTI-AL/00-statement.md`, `rmdir specs`. Layout final: `LTI-AL/{00-statement,LTI-AL,prompts}.md` + `CLAUDE.md` en la raíz.
+
+---
+
+## Prompt 6 — Stage/commit/push + abrir PR hacia upstream (2026-04-13)
+
+```
+haga un stage/commit/push, y de alla creame un PR en github hacia
+https://github.com/LIDR-academy/AI4Devs-design-1-202602
+```
+
+Acciones: commit `5bc9bc5`, push a `origin/feat/lti-al-design`, PR abierto: https://github.com/LIDR-academy/AI4Devs-design-1-202602/pull/21.
+
+---
+
+## Prompt 7 — Añadir tabla `tenant` (2026-04-13)
+
+```
+sabes que falta? una tabla de tenant - opcionalmente que permita
+configurar webhooks de alertas y integracion con otras herramientras.
+modificalo, hazlo stage/push
+```
+
+Acciones: añadida entidad **tenant** al modelo de datos con `webhooks` (lista opcional `{event,url,secret}`) e `integrations` (map por proveedor con claves cifradas KMS); ER actualizado (`TENANT ||--o{ USUARIO/VACANTE`); referencias a "4 tablas" actualizadas a "5 tablas" en descripción, ventajas, Lean Canvas y diagramas C2/C3.
